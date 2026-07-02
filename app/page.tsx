@@ -18,7 +18,8 @@ export default function Home() {
   async function generate() {
     setCurrentIndex(0); // Resets review deck back to the first card for the new batch
     setFlipped(false);  // Forces the deck to start on the question side, not the answer side
-    setCards([]);       // Wipes out old flashcards from the screen immediately
+    setCards([]);
+    setLoading(true);      // Wipes out old flashcards from the screen immediately
 
     // Sends a network request over to our private backend folder route
     const res = await fetch("/api/generate", {
