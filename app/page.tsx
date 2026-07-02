@@ -93,11 +93,12 @@ export default function Home() {
   
       if (deckError) throw deckError;
   
-      // 2. Format cards matching your schema parameters
-      const cardsToInsert = cards.map((card) => ({
+      // 2. Match your REAL database column names: question, answer, and position
+      const cardsToInsert = cards.map((card, index) => ({
         deck_id: deckData.id,
-        front: card.question, // Maps your frontend 'question' key to database 'front' column
-        back: card.answer,   // Maps your frontend 'answer' key to database 'back' column
+        question: card.question, // Reverted back to your true schema column
+        answer: card.answer,     // Reverted back to your true schema column
+        position: index          // Preserves your card sequence order
       }));
   
       // 3. Batch insert all the cards belonging to this deck
@@ -109,14 +110,12 @@ export default function Home() {
 
       alert("Deck saved successfully to your profile! 🎉");
     } catch (error: any) {
-      // Access direct properties so the error prints clearly instead of showing {}
       console.error("Error saving deck:", error.message || error);
       alert(error.message || "Failed to save the deck.");
     } finally {
       setSaving(false);
     }
-  }
-
+  }  
   // --- 3. Database Save Pipeline ---
   
   // --- 4. The AI Communication Courier Function ---
