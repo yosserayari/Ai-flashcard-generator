@@ -1,36 +1,63 @@
-This is a [Next.js](https://nextjs.org) project bootstrapped with [`create-next-app`](https://nextjs.org/docs/app/api-reference/cli/create-next-app).
+# 🎴 AI Flashcard Generator
 
-## Getting Started
+Paste your notes in, get study-ready flashcards out — powered by Groq for near-instant generation.
 
-First, run the development server:
+## What it does
+
+Studying often means turning raw notes into question/answer pairs by hand, which is slow and easy to put off. This app automates that: paste any block of text (lecture notes, a textbook paragraph, an article) and it generates a set of flashcards you can immediately start reviewing.
+
+## Features
+
+- 📝 Paste in any text/notes as input
+- ⚡ Flashcards generated via the Groq API (fast inference)
+- 🎴 Clean, simple UI for reviewing generated cards
+- 🌐 Built with Next.js, deployed on Vercel
+
+## Demo
+
+**Live app:** [link to your Vercel deployment]
+
+*(Add a screenshot or short GIF here showing a paste → generated cards flow — this is the single highest-impact thing you can add to this README.)*
+
+## Getting started
+
+```bash
+git clone https://github.com/yosserayari/Ai-flashcard-generator.git
+cd Ai-flashcard-generator
+npm install
+```
+
+Create a `.env.local` file with your Groq API key:
+
+```
+GROQ_API_KEY=your_key_here
+```
+
+Then run the dev server:
 
 ```bash
 npm run dev
-# or
-yarn dev
-# or
-pnpm dev
-# or
-bun dev
 ```
 
-Open [http://localhost:3000](http://localhost:3000) with your browser to see the result.
+Open [http://localhost:3000](http://localhost:3000) to use it locally.
 
-You can start editing the page by modifying `app/page.tsx`. The page auto-updates as you edit the file.
+## Tech stack
 
-This project uses [`next/font`](https://nextjs.org/docs/app/building-your-application/optimizing/fonts) to automatically optimize and load [Geist](https://vercel.com/font), a new font family for Vercel.
+- [Next.js](https://nextjs.org/)
+- [Groq API](https://groq.com/) for AI generation
+- Deployed on [Vercel](https://vercel.com/)
 
-## Learn More
+## Roadmap / ideas
 
-To learn more about Next.js, take a look at the following resources:
+- [ ] Export flashcards to Anki
+- [ ] Support PDF/file upload as input
+- [ ] Spaced repetition mode
+- [ ] Save/organize flashcard decks
 
-- [Next.js Documentation](https://nextjs.org/docs) - learn about Next.js features and API.
-- [Learn Next.js](https://nextjs.org/learn) - an interactive Next.js tutorial.
+## Contributing
 
-You can check out [the Next.js GitHub repository](https://github.com/vercel/next.js) - your feedback and contributions are welcome!
+Issues and pull requests are welcome — this is an early, actively developed project.
 
-## Deploy on Vercel
+## License
 
-The easiest way to deploy your Next.js app is to use the [Vercel Platform](https://vercel.com/new?utm_medium=default-template&filter=next.js&utm_source=create-next-app&utm_campaign=create-next-app-readme) from the creators of Next.js.
-
-Check out our [Next.js deployment documentation](https://nextjs.org/docs/app/building-your-application/deploying) for more details.
+MIT
