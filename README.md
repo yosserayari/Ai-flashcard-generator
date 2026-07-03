@@ -15,9 +15,7 @@ Studying often means turning raw notes into question/answer pairs by hand, which
 
 ## Demo
 
-**Live app:** [link to your Vercel deployment]
-
-*(Add a screenshot or short GIF here showing a paste → generated cards flow — this is the single highest-impact thing you can add to this README.)*
+**Live app:https://ai-flashcard-generator-rosy.vercel.app
 
 ## Getting started
 
