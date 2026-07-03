@@ -1,26 +1,40 @@
+@import url('https://fonts.googleapis.com/css2?family=Fraunces:opsz,wght@9..144,500;9..144,600&family=Inter:wght@400;500;600&family=Space+Mono:wght@400;700&display=swap');
 @import "tailwindcss";
 
 :root {
-  --background: #ffffff;
-  --foreground: #171717;
+  --background: #FAF7F0;
+  --foreground: #201A2B;
+
+  --color-paper: #FAF7F0;
+  --color-ink: #201A2B;
+  --color-ink-soft: #58506B;
+  --color-highlighter: #F4C95D;
+  --color-highlighter-hover: #EBB93E;
+  --color-teal: #2F6F6D;
+  --color-line: #E4DDCB;
+  --color-error: #C4634A;
+  --color-error-bg: #FBEEE9;
 }
 
 @theme inline {
   --color-background: var(--background);
   --color-foreground: var(--foreground);
-  --font-sans: var(--font-geist-sans);
-  --font-mono: var(--font-geist-mono);
-}
-
-@media (prefers-color-scheme: dark) {
-  :root {
-    --background: #0a0a0a;
-    --foreground: #ededed;
-  }
+  --color-paper: var(--color-paper);
+  --color-ink: var(--color-ink);
+  --color-ink-soft: var(--color-ink-soft);
+  --color-highlighter: var(--color-highlighter);
+  --color-highlighter-hover: var(--color-highlighter-hover);
+  --color-teal: var(--color-teal);
+  --color-line: var(--color-line);
+  --color-error: var(--color-error);
+  --color-error-bg: var(--color-error-bg);
+  --font-sans: 'Inter', ui-sans-serif, system-ui, sans-serif;
+  --font-display: 'Fraunces', serif;
+  --font-label: 'Space Mono', ui-monospace, monospace;
 }
 
 body {
   background: var(--background);
   color: var(--foreground);
-  font-family: Arial, Helvetica, sans-serif;
+  font-family: 'Inter', ui-sans-serif, system-ui, sans-serif;
 }
