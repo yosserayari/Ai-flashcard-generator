@@ -1,106 +1,186 @@
 "use client";
-import { useState, useEffect } from "react";
+import React, { useState, useEffect } from "react";
 import type { Card } from "../lib/types";
 
 interface FlashcardViewerProps {
   cards: Card[];
-  deckLabel?: string;      // shown next to the counter, e.g. the deck's saved title
-  onSave?: () => void;     // pass this in only where saving makes sense (home page)
+  deckLabel?: string;
+  onSave?: () => void;
   saving?: boolean;
+  onRateCard?: (cardId: string, rating: "easy" | "hard") => Promise<void>;
 }
 
-function downloadBlob(blob: Blob, filename: string) {
-  const url = URL.createObjectURL(blob);
-  const a = document.createElement("a");
-  a.href = url;
-  a.download = filename;
-  a.click();
-  URL.revokeObjectURL(url);
-}
-
-// Fallback label for export filenames when no deckLabel was passed in
-function fallbackLabel(cards: Card[]): string {
-  const source = cards[0]?.question?.trim() || "flashcards";
-  return source.split(/\s+/).slice(0, 6).join(" ");
-}
-
-export default function FlashcardViewer({ cards, deckLabel, onSave, saving }: FlashcardViewerProps) {
+export default function FlashcardViewer({
+  cards,
+  deckLabel,
+  onSave,
+  saving = false,
+  onRateCard,
+}: FlashcardViewerProps) {
   const [currentIndex, setCurrentIndex] = useState(0);
-  const [flipped, setFlipped] = useState(false);
+  const [isFlipped, setIsFlipped] = useState(false);
 
-  // Reset to the first card whenever a different deck's cards are handed in
+  if (!cards || cards.length === 0) return null;
+
+  const currentCard = cards[currentIndex];
+
+  const handleNext = () => {
+    setIsFlipped(false);
+    setCurrentIndex((prev) => (prev + 1) % cards.length);
+  };
+
+  const handlePrev = () => {
+    setIsFlipped(false);
+    setCurrentIndex((prev) => (prev - 1 + cards.length) % cards.length);
+  };
+
+  const handleFlip = () => {
+    setIsFlipped((prev) => !prev);
+  };
+
+  // --- Keyboard Event Listener Feature ---
   useEffect(() => {
-    setCurrentIndex(0);
-    setFlipped(false);
-  }, [cards]);
+    const handleKeyDown = (event: KeyboardEvent) => {
+      // Don't fire if the user is typing inside an input or textarea
+      if (
+        document.activeElement?.tagName === "INPUT" ||
+        document.activeElement?.tagName === "TEXTAREA"
+      ) {
+        return;
+      }
 
-  if (cards.length === 0) return null;
+      if (event.code === "Space") {
+        event.preventDefault(); // Stop page from scrolling down
+        handleFlip();
+      } else if (event.key === "ArrowRight") {
+        handleNext();
+      } else if (event.key === "ArrowLeft") {
+        handlePrev();
+      }
+    };
 
-  function exportCSV() {
-    const escape = (s: string) => `"${s.replace(/"/g, '""')}"`;
-    const header = "question,answer\n";
-    const rows = cards.map((c) => `${escape(c.question)},${escape(c.answer)}`).join("\n");
-    const blob = new Blob([header + rows], { type: "text/csv" });
-    downloadBlob(blob, `${(deckLabel || fallbackLabel(cards)).trim()}.csv`);
-  }
+    window.addEventListener("keydown", handleKeyDown);
+    return () => {
+      window.removeEventListener("keydown", handleKeyDown);
+    };
+  }, [currentIndex, isFlipped, cards]); // Re-bind when state adjustments occur
 
-  function exportTXT() {
-    const content = cards.map((c, i) => `${i + 1}. Q: ${c.question}\n   A: ${c.answer}`).join("\n\n");
-    const blob = new Blob([content], { type: "text/plain" });
-    downloadBlob(blob, `${(deckLabel || fallbackLabel(cards)).trim()}.txt`);
-  }
+  const handleExportCSV = () => {
+    const csvContent = "data:text/csv;charset=utf-8," 
+      + cards.map(e => `"${e.question.replace(/"/g, '""')}","${e.answer.replace(/"/g, '""')}"`).join("\n");
+    const encodedUri = encodeURI(csvContent);
+    const link = document.createElement("a");
+    link.setAttribute("href", encodedUri);
+    link.setAttribute("download", `${deckLabel || "flashcards"}.csv`);
+    document.body.appendChild(link);
+    link.click();
+    document.body.removeChild(link);
+  };
 
-  const card = cards[currentIndex];
+  const handleExportTXT = () => {
+    const txtContent = cards.map(e => `${e.question}\t${e.answer}`).join("\n");
+    const blob = new Blob([txtContent], { type: "text/plain;charset=utf-8" });
+    const url = URL.createObjectURL(blob);
+    const link = document.createElement("a");
+    link.href = url;
+    link.download = `${deckLabel || "flashcards"}.txt`;
+    document.body.appendChild(link);
+    link.click();
+    document.body.removeChild(link);
+    URL.revokeObjectURL(url);
+  };
 
   return (
-    <div>
-      <div className="flex justify-between items-center mb-3">
-        <p className="font-label text-xs uppercase tracking-widest text-ink-soft">
-          {deckLabel ? `${deckLabel} · ` : ""}
-          Card {currentIndex + 1} / {cards.length}
-        </p>
-        <div className="flex gap-2">
-          <button onClick={exportCSV} className="text-xs border border-line px-2.5 py-1 rounded hover:border-teal hover:text-teal transition-colors">
+    <div className="w-full space-y-6">
+      {/* Top Controls Bar */}
+      <div className="flex justify-between items-center text-sm border-b border-line pb-3">
+        <span className="font-medium text-ink-soft">
+          CARD {currentIndex + 1} / {cards.length}
+        </span>
+        <div className="flex items-center gap-2">
+          <button 
+            onClick={handleExportCSV}
+            className="px-3 py-1 border border-line rounded bg-white hover:border-ink transition text-xs"
+          >
             CSV
           </button>
-          <button onClick={exportTXT} className="text-xs border border-line px-2.5 py-1 rounded hover:border-teal hover:text-teal transition-colors">
+          <button 
+            onClick={handleExportTXT}
+            className="px-3 py-1 border border-line rounded bg-white hover:border-ink transition text-xs"
+          >
             TXT
           </button>
-          {onSave && (
+          {onSave && !currentCard.deck_id && (
             <button
               onClick={onSave}
               disabled={saving}
-              className="text-xs bg-ink text-paper px-3 py-1 rounded hover:bg-teal transition-colors disabled:opacity-40"
+              className="px-3 py-1 bg-ink text-paper rounded hover:bg-teal transition text-xs font-medium disabled:opacity-50"
             >
-              {saving ? "Saving…" : "Save deck"}
+              {saving ? "Saving..." : "Save deck"}
             </button>
           )}
         </div>
       </div>
 
-      <div
-        onClick={() => setFlipped(!flipped)}
-        className="relative bg-white border border-line rounded-lg shadow-[0_4px_14px_rgba(32,26,43,0.08)] p-10 min-h-[200px] flex items-center justify-center text-center cursor-pointer select-none hover:-translate-y-0.5 hover:shadow-[0_8px_20px_rgba(32,26,43,0.1)] transition-all"
+      {/* Main Flashcard Container */}
+      <div 
+        onClick={handleFlip}
+        className="w-full min-h-[220px] bg-white border border-line rounded-xl shadow-sm p-8 flex items-center justify-center cursor-pointer select-none transition-all duration-300 hover:shadow-md relative overflow-hidden"
       >
-        <div className="absolute top-5 left-6 right-6 h-px bg-line" />
-        <p className="text-lg leading-relaxed">{flipped ? card.answer : card.question}</p>
-        <span className="absolute bottom-3 right-4 font-label text-[10px] uppercase tracking-widest text-ink-soft/50">
-          {flipped ? "Answer" : "Question"}
+        <div className="text-center max-w-xl">
+          <p className="text-lg md:text-xl font-medium leading-relaxed">
+            {isFlipped ? currentCard.answer : currentCard.question}
+          </p>
+        </div>
+        <span className="absolute bottom-3 right-4 font-label text-[10px] uppercase tracking-wider text-ink-soft/40">
+          {isFlipped ? "Answer" : "Question"}
         </span>
       </div>
 
-      <p className="text-xs text-ink-soft/60 text-center mt-3">Click card to flip</p>
+      <p className="text-center text-xs text-ink-soft/50">
+        Click card or press <kbd className="px-1.5 py-0.5 bg-paper border border-line rounded text-[10px]">Space</kbd> to flip
+      </p>
 
-      <div className="flex justify-between mt-5">
+      {/* Spaced Repetition Actions */}
+      {isFlipped && onRateCard && (
+        <div className="flex justify-center gap-3 py-2 animate-in fade-in slide-in-from-bottom-2 duration-200">
+          <button
+            onClick={(e) => {
+              e.stopPropagation();
+              onRateCard(currentCard.id!, "hard");
+              handleNext();
+            }}
+            className="flex items-center gap-1.5 px-4 py-2 text-xs font-semibold border border-red-200 bg-red-50 text-red-700 rounded-md hover:bg-red-100 transition shadow-sm"
+          >
+            🔴 Hard (Reset)
+          </button>
+          <button
+            onClick={(e) => {
+              e.stopPropagation();
+              onRateCard(currentCard.id!, "easy");
+              handleNext();
+            }}
+            className="flex items-center gap-1.5 px-4 py-2 text-xs font-semibold border border-green-200 bg-green-50 text-green-700 rounded-md hover:bg-green-100 transition shadow-sm"
+          >
+            🟢 Easy (Advance)
+          </button>
+        </div>
+      )}
+
+      {/* Navigation Buttons */}
+      <div className="flex justify-between items-center pt-2">
         <button
-          onClick={() => { setFlipped(false); setCurrentIndex((i) => (i === 0 ? cards.length - 1 : i - 1)); }}
-          className="text-sm px-4 py-2 border border-line rounded-md hover:border-ink transition-colors"
+          onClick={handlePrev}
+          className="px-4 py-2 border border-line rounded-lg text-sm font-medium bg-white hover:border-ink transition active:scale-[0.98]"
         >
           ← Prev
         </button>
+        <span className="text-xs text-ink-soft/40 hidden sm:inline font-label">
+          ← / → keys navigate
+        </span>
         <button
-          onClick={() => { setFlipped(false); setCurrentIndex((i) => (i === cards.length - 1 ? 0 : i + 1)); }}
-          className="text-sm px-4 py-2 border border-line rounded-md hover:border-ink transition-colors"
+          onClick={handleNext}
+          className="px-4 py-2 border border-line rounded-lg text-sm font-medium bg-white hover:border-ink transition active:scale-[0.98]"
         >
           Next →
         </button>

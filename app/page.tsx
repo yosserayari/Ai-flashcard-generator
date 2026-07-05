@@ -27,6 +27,37 @@ function deriveDeckTitle(cards: Card[]): string {
   return title.length < source.length ? `${title}…` : title;
 }
 
+// SM2 Algorithm Utility function directly inside page.tsx context
+function calculateNextReview(
+  currentInterval: number,
+  currentEase: number,
+  rating: "easy" | "hard"
+) {
+  let nextInterval = 1;
+  let nextEase = currentEase;
+
+  if (rating === "easy") {
+    if (currentInterval === 1) {
+      nextInterval = 3;
+    } else {
+      nextInterval = Math.ceil(currentInterval * currentEase);
+    }
+    nextEase = Math.min(currentEase + 0.15, 3.0);
+  } else {
+    nextInterval = 1;
+    nextEase = Math.max(currentEase - 0.3, 1.3);
+  }
+
+  const nextReviewAt = new Date();
+  nextReviewAt.setDate(nextReviewAt.getDate() + nextInterval);
+
+  return {
+    next_review_at: nextReviewAt.toISOString(),
+    interval_days: nextInterval,
+    ease_factor: nextEase,
+  };
+}
+
 export default function Home() {
   const [user, setUser] = useState<User | null>(null);
   const [saving, setSaving] = useState(false);
@@ -73,7 +104,53 @@ export default function Home() {
     setUser(null);
   }
 
-  async function saveDeck() {
+  // --- Spaced Repetition Rating Database Handler ---
+  async function handleRateCard(cardId: string, rating: "easy" | "hard") {
+    // If the card is part of a newly generated deck that hasn't been saved to DB yet,
+    // skip the database write silently.
+    const targetCard = cards.find((c) => (c as any).id === cardId);
+    if (!targetCard || !(targetCard as any).deck_id) return;
+
+    const supabase = createClient();
+    
+    // Extract values with sensible fallback defaults matching your migration properties
+    const currentInterval = (targetCard as any).interval_days ?? 1;
+    const currentEase = (targetCard as any).ease_factor ?? 2.5;
+
+    const updates = calculateNextReview(currentInterval, currentEase, rating);
+
+    // Persist calculation modifications to Supabase
+    const { error: dbError } = await supabase
+      .from("cards")
+      .update({
+        next_review_at: updates.next_review_at,
+        interval_days: updates.interval_days,
+        ease_factor: updates.ease_factor,
+      })
+      .eq("id", cardId);
+
+    if (dbError) {
+      console.error("Failed to persist card rating update:", dbError.message);
+      return;
+    }
+
+    // Update active memory array reference so the dynamic local state reflects metrics changes
+// Update active memory array reference cleanly
+    setCards((prevCards) =>
+      prevCards.map((c) =>
+        (c as any).id === cardId
+          ? {
+              ...c,
+              interval_days: updates.interval_days,
+              ease_factor: updates.ease_factor,
+              next_review_at: updates.next_review_at,
+            }
+          : c
+      )
+    );
+  }
+
+async function saveDeck() {
     if (cards.length === 0) return;
     if (!user) {
       alert("Please log in to save your decks!");
@@ -99,10 +176,17 @@ export default function Home() {
         position: index
       }));
 
-      const { error: cardsError } = await supabase.from('cards').insert(cardsToInsert);
+      const { data: insertedCards, error: cardsError } = await supabase
+        .from('cards')
+        .insert(cardsToInsert)
+        .select();
+        
       if (cardsError) throw cardsError;
 
-      alert("Deck saved! Find it anytime under History. 🎉");
+      if (insertedCards && insertedCards.length > 0) {
+        setCards(insertedCards);
+        alert("Deck saved! Find it anytime under History. 🎉");
+      }
     } catch (error: any) {
       console.error("Error saving deck:", error.message || error);
       alert(error.message || "Failed to save the deck.");
@@ -134,7 +218,6 @@ export default function Home() {
       }
 
       if (!extractedText.trim()) {
-        // Common cause: scanned slides / image-only PDF with no embedded text layer.
         throw new Error(
           "No readable text found in this PDF. If it's a scanned document or image-based slides, try an OCR tool first, or paste the text manually."
         );
@@ -150,11 +233,7 @@ export default function Home() {
     }
   }
 
-  // --- Real Anki .apkg export — built server-side (see app/api/export-anki/route.ts) ---
-  // The sql.js library anki-apkg-export depends on needs real Node fs/path, which don't
-  // exist in the browser. Rather than fighting the bundler to fake them client-side,
-  // we just send the cards to a server route and download the file it returns.
-async function handleAnkiExport() {
+  async function handleAnkiExport() {
     if (cards.length === 0) return;
 
     setAnkiExporting(true);
@@ -193,7 +272,7 @@ async function handleAnkiExport() {
     }
   }
 
-  async function generate() {
+async function generate() {
     const trimmed = text.trim();
 
     if (trimmed.length < MIN_INPUT_LENGTH) {
@@ -237,7 +316,15 @@ async function handleAnkiExport() {
         return;
       }
 
-      setCards(data.cards);
+      // Ensure every card has a structural fallback for UI rendering checks
+      const sanitizedCards = data.cards.map((card: any, index: number) => ({
+        id: card.id || `temp-${Date.now()}-${index}`, // Give temporary client ID so UI stays stable
+        deck_id: null,
+        question: card.question || "",
+        answer: card.answer || ""
+      }));
+
+      setCards(sanitizedCards);
     } catch (err: any) {
       if (err.name === "AbortError") {
         setError("This is taking too long — the server may be busy. Please try again in a moment.");
@@ -246,8 +333,8 @@ async function handleAnkiExport() {
       }
       console.error("Generate error:", err);
     } finally {
-      clearTimeout(timeout);
       setLoading(false);
+      clearTimeout(timeout);
     }
   }
 
@@ -317,7 +404,6 @@ async function handleAnkiExport() {
           )}
         </div>
 
-        {/* Privacy note — builds trust before someone pastes real course material */}
         <p className="text-xs text-ink-soft/60 mb-3">
           Your text is only sent to generate cards and isn't stored unless you hit "Save deck."
         </p>
@@ -379,7 +465,12 @@ async function handleAnkiExport() {
         {/* Study view */}
         {!loading && cards.length > 0 && (
           <div className="mt-10">
-            <FlashcardViewer cards={cards} onSave={saveDeck} saving={saving} />
+            <FlashcardViewer 
+              cards={cards} 
+              onSave={saveDeck} 
+              saving={saving} 
+              onRateCard={handleRateCard}
+            />
           </div>
         )}
       </main>
