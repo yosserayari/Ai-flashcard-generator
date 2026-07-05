@@ -1,78 +1,152 @@
-import { NextRequest, NextResponse } from "next/server"; // Imports Next.js tools to read incoming web requests and send back server responses
+import { NextResponse } from "next/server";
+import Groq from "groq-sdk";
 
-// This function intercepts incoming HTTP "POST" requests sent to the '/api/generate' URL route
-export async function POST(req: NextRequest) {
+const groq = new Groq({ apiKey: process.env.GROQ_API_KEY });
+
+const MIN_INPUT_LENGTH = 20;
+const MAX_INPUT_LENGTH = 20000; // keep in sync with the frontend cap
+
+// --- Simple in-memory rate limiter ---
+// Good enough for an MVP getting its first 5-50 testers. NOTE: this resets on
+// every server restart/deploy, and on serverless platforms (Vercel etc.) each
+// instance has its own memory, so it's not a hard global limit — it just stops
+// casual abuse and accidental loops. If this app gets real traffic, swap this
+// for Upstash Redis or Vercel KV so the counter is shared across instances.
+const RATE_LIMIT_WINDOW_MS = 60_000; // 1 minute
+const RATE_LIMIT_MAX_REQUESTS = 5; // 5 generations per IP per minute
+
+const requestLog = new Map<string, number[]>();
+
+function isRateLimited(ip: string): boolean {
+  const now = Date.now();
+  const timestamps = (requestLog.get(ip) || []).filter(
+    (t) => now - t < RATE_LIMIT_WINDOW_MS
+  );
+
+  if (timestamps.length >= RATE_LIMIT_MAX_REQUESTS) {
+    requestLog.set(ip, timestamps);
+    return true;
+  }
+
+  timestamps.push(now);
+  requestLog.set(ip, timestamps);
+  return false;
+}
+
+function getClientIp(req: Request): string {
+  const forwarded = req.headers.get("x-forwarded-for");
+  if (forwarded) return forwarded.split(",")[0].trim();
+  return req.headers.get("x-real-ip") || "unknown";
+}
+
+function isValidCards(value: unknown): value is { question: string; answer: string }[] {
+  return (
+    Array.isArray(value) &&
+    value.length > 0 &&
+    value.every(
+      (c) =>
+        c &&
+        typeof c === "object" &&
+        typeof (c as any).question === "string" &&
+        typeof (c as any).answer === "string" &&
+        (c as any).question.trim() &&
+        (c as any).answer.trim()
+    )
+  );
+}
+
+export async function POST(req: Request) {
   try {
-    // Unpacks the incoming network JSON package from page.tsx and extracts the "text" variable containing your notes
-    const { text } = await req.json();
+    const ip = getClientIp(req);
 
-    // Safety Guard: If there is no text, or if it's too short (less than 20 characters), stop immediately
-    if (!text || text.trim().length < 20) {
+    if (isRateLimited(ip)) {
       return NextResponse.json(
-        { error: "Please provide more text to generate flashcards from." },
-        { status: 400 } // Sends a "400 Bad Request" status code back to your frontend
+        { error: "You're generating decks quickly — please wait a minute and try again." },
+        { status: 429 }
       );
     }
 
-    // Server-to-Server Bridge: Securely knocks on Groq API's door
-    const response = await fetch("https://api.groq.com/openai/v1/chat/completions", {
-      method: "POST", // Sending a package payload to Groq
-      headers: {
-        "Content-Type": "application/json",
-        // Pulls your secret API key straight from the server's environment vault (hidden from user inspection)
-        "Authorization": `Bearer ${process.env.GROQ_API_KEY}`,
-      },
-      body: JSON.stringify({
-        model: "llama-3.3-70b-versatile", // Specifies the exact LLM thinking engine to handle the work
-        response_format: { type: "json_object" }, // Strict mode: Forces the AI to talk ONLY in structured computer code (JSON)
-        temperature: 0.8, // Creative variance: Your added setting to ensure cards change on every single click!
-        messages: [
-          {
-            role: "user",
-            // System instructions telling the AI exactly what behavior to adopt and providing your text variable
-            content: `You are a flashcard generator. Given the input text, create a JSON object containing an array of 8-12 flashcards covering key facts.
-            
-IMPORTANT: Vary your focus! Select different concepts, terms, angles, or details each time so that multiple requests on the same text produce entirely unique card decks.
+    const { text } = await req.json();
 
-Respond ONLY with a valid JSON object matching this schema exactly...:
-            {
-              "cards": [
-                {"question": "What is HTML?", "answer": "HyperText Markup Language"}
-              ]
-            }
-
-            Input Text:
-            ${text}`, // Dynamic string interpolation merging your input notes into the prompt
-          },
-        ],
-      }),
-    });
-
-    // Waits for Groq to finish its thinking calculations and converts the response stream into a readable data object
-    const data = await response.json();
-    
-    // Error Safeguard: If Groq rejected the key or its servers are down, flag it here
-    if (!response.ok) {
-      console.error("Groq API Error:", data); // Prints error data inside your private local terminal logs
-      return NextResponse.json({ error: "Groq API call failed" }, { status: response.status });
+    if (!text || typeof text !== "string" || !text.trim()) {
+      return NextResponse.json({ error: "No text provided for card generation." }, { status: 400 });
     }
 
-    // Drills deep inside the standard OpenAI/Groq response object to extract the raw text string containing the AI's answer
-    const raw = data.choices?.[0]?.message?.content ?? "{}";
-    console.log("RAW AI OUTPUT:", raw); // Keeps a local log copy of what the AI produced before parsing it
+    const trimmed = text.trim();
 
-    // Takes that plain raw text string and compiles it into an active, live JavaScript object
-    const parsedJson = JSON.parse(raw);
-    
-    // Returns a beautiful, clean array list back to page.tsx to populate your cards array state variable
-    return NextResponse.json({ cards: parsedJson.cards || [] });
+    if (trimmed.length < MIN_INPUT_LENGTH) {
+      return NextResponse.json(
+        { error: `Please provide at least ${MIN_INPUT_LENGTH} characters of text.` },
+        { status: 400 }
+      );
+    }
 
-  } catch (err) {
-    // If JSON parsing fails (the AI output formatting breaks) or the server crashes, catch it gracefully right here
-    console.error("SERVER EXCEPTION:", err);
+    if (trimmed.length > MAX_INPUT_LENGTH) {
+      return NextResponse.json(
+        { error: `That text is too long (max ${MAX_INPUT_LENGTH.toLocaleString()} characters). Please shorten it and try again.` },
+        { status: 400 }
+      );
+    }
+
+    const systemPrompt = `
+      You are an expert educational tool and specialized study assistant.
+      Your task is to parse the user's provided study notes, lecture slides, or articles and extract the core concepts into structural flashcards.
+      CRITICAL SYSTEM CONSTRAINTS:
+      1. Return your response ONLY as a raw, valid JSON object. Do not wrap it in markdown code blocks like \`\`\`json.
+      2. The JSON structure MUST exactly follow this schema:
+         {
+           "cards": [
+             { "question": "Front side: The question, core concept, or technical prompt", "answer": "Back side: The answer, definition, or concise summary statement" }
+           ]
+         }
+      3. Extract between 4 to 10 distinct high-yield cards depending on the density of the source text. Keep definitions and answers crisp, professional, and optimized for active recall. Ensure all nested quotes inside strings are escaped safely.
+    `;
+
+    let completion;
+    try {
+      completion = await groq.chat.completions.create({
+        messages: [
+          { role: "system", content: systemPrompt },
+          { role: "user", content: `Transform the following text material into structured flashcards:\n\n${trimmed}` }
+        ],
+        model: "openai/gpt-oss-120b",
+        temperature: 0.3,
+      });
+    } catch (groqErr: any) {
+      console.error("Groq API call failed:", groqErr);
+      return NextResponse.json(
+        { error: "The AI service is temporarily unavailable. Please try again shortly." },
+        { status: 502 }
+      );
+    }
+
+    const rawResponse = completion.choices[0]?.message?.content?.trim() || "{}";
+
+    let parsedData: any;
+    try {
+      parsedData = JSON.parse(rawResponse);
+    } catch (parseErr) {
+      console.error("Failed to parse Groq output as JSON:", rawResponse);
+      return NextResponse.json(
+        { error: "Couldn't process the notes into flashcards. Please try again." },
+        { status: 500 }
+      );
+    }
+
+    if (!isValidCards(parsedData?.cards)) {
+      console.error("Groq returned malformed card structure:", parsedData);
+      return NextResponse.json(
+        { error: "The AI response wasn't in the right format. Please try again." },
+        { status: 500 }
+      );
+    }
+
+    return NextResponse.json({ cards: parsedData.cards });
+  } catch (error: any) {
+    console.error("Groq Generation Route Error:", error);
     return NextResponse.json(
-      { error: "AI returned malformed output or server failed. Try again." },
-      { status: 500 } // "500 Internal Server Error" means a severe unexpected backend crash occurred
+      { error: "Something went wrong processing your notes. Please try again." },
+      { status: 500 }
     );
   }
 }
