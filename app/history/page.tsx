@@ -3,18 +3,22 @@ import Link from "next/link";
 import { useEffect, useState } from "react";
 import { createClient } from "../lib/supabase";
 import FlashcardViewer from "../components/FlashcardViewer";
+import ShareDeckButton from "../components/ShareDeckButton";
 import type { Card } from "../lib/types";
 
 interface SavedDeck {
   id: string;
   title: string;
   created_at?: string;
+  share_id?: string;
 }
 
 export default function HistoryPage() {
   const [decks, setDecks] = useState<SavedDeck[]>([]);
   const [loadingDecks, setLoadingDecks] = useState(true);
   const [deletingId, setDeletingId] = useState<string | null>(null);
+  const [user, setUser] = useState<any>(null);
+  const [isLoading, setIsLoading] = useState(true);
 
   // The currently opened deck, if any — showing its viewer replaces the list
   const [selectedDeck, setSelectedDeck] = useState<SavedDeck | null>(null);
@@ -22,27 +26,42 @@ export default function HistoryPage() {
   const [loadingCards, setLoadingCards] = useState(false);
 
   useEffect(() => {
-    fetchDecks();
+    checkUserAndFetchDecks();
   }, []);
 
-  async function fetchDecks() {
-    setLoadingDecks(true);
+  async function checkUserAndFetchDecks() {
+    setIsLoading(true);
     const supabase = createClient();
+    
     try {
-      const { data: { user } } = await supabase.auth.getUser();
-      if (!user) {
+      // Check if user is authenticated
+      const { data: { user }, error: userError } = await supabase.auth.getUser();
+      
+      if (userError || !user) {
+        console.log('User not authenticated');
+        setUser(null);
         setDecks([]);
+        setIsLoading(false);
         return;
       }
+      
+      setUser(user);
+      
+      // Fetch decks for this user
       const { data, error } = await supabase
         .from("decks")
-        .select("id, title, created_at")
+        .select("id, title, created_at, share_id")
+        .eq("user_id", user.id)
         .order("created_at", { ascending: false });
+        
       if (error) throw error;
+      
+      console.log('Fetched decks:', data);
       setDecks(data || []);
     } catch (err: any) {
       console.error("Error fetching decks:", err.message);
     } finally {
+      setIsLoading(false);
       setLoadingDecks(false);
     }
   }
@@ -87,6 +106,40 @@ export default function HistoryPage() {
     } finally {
       setDeletingId(null);
     }
+  }
+
+  if (isLoading) {
+    return (
+      <div className="min-h-screen bg-paper flex items-center justify-center">
+        <p className="text-gray-500">Loading...</p>
+      </div>
+    );
+  }
+
+  if (!user) {
+    return (
+      <div className="min-h-screen bg-paper text-ink">
+        <main className="max-w-2xl mx-auto px-6 py-10">
+          <div className="flex items-center justify-between mb-10">
+            <Link href="/" className="font-display text-2xl font-semibold tracking-tight">
+              Flashcard<span className="text-highlighter">.</span>
+            </Link>
+            <Link
+              href="/"
+              className="text-sm border border-line px-3 py-1.5 rounded-md hover:border-ink transition-colors"
+            >
+              + New deck
+            </Link>
+          </div>
+          <div className="text-center py-12">
+            <p className="text-gray-500">Please sign in to view your decks.</p>
+            <Link href="/" className="text-teal hover:underline mt-2 inline-block">
+              Go to home page
+            </Link>
+          </div>
+        </main>
+      </div>
+    );
   }
 
   return (
@@ -138,10 +191,13 @@ export default function HistoryPage() {
             {decks.map((deck, i) => (
               <div
                 key={deck.id}
-                onClick={() => openDeck(deck)}
-                className="group flex items-center justify-between gap-4 py-4 border-b border-line cursor-pointer"
+                className="group flex items-center justify-between gap-4 py-4 border-b border-line"
               >
-                <div className="flex items-baseline gap-4 min-w-0">
+                {/* Clickable deck area */}
+                <div 
+                  onClick={() => openDeck(deck)}
+                  className="flex items-baseline gap-4 min-w-0 flex-1 cursor-pointer"
+                >
                   <span className="font-label text-xs text-ink-soft/50 shrink-0 w-6">
                     {String(i + 1).padStart(2, "0")}
                   </span>
@@ -159,13 +215,24 @@ export default function HistoryPage() {
                   </div>
                 </div>
 
-                <button
-                  onClick={(e) => deleteDeck(deck.id, e)}
-                  disabled={deletingId === deck.id}
-                  className="text-xs text-error opacity-0 group-hover:opacity-100 hover:underline disabled:opacity-40 transition-opacity shrink-0"
-                >
-                  {deletingId === deck.id ? "…" : "Delete"}
-                </button>
+                {/* Action buttons */}
+                <div className="flex items-center gap-2 shrink-0">
+                  {/* Share Button - Always show if user is logged in */}
+                  <ShareDeckButton 
+                    deckId={deck.id} 
+                    deckTitle={deck.title}
+                    existingShareId={deck.share_id}
+                  />
+                  
+                  {/* Delete Button */}
+                  <button
+                    onClick={(e) => deleteDeck(deck.id, e)}
+                    disabled={deletingId === deck.id}
+                    className="text-xs text-error opacity-0 group-hover:opacity-100 hover:underline disabled:opacity-40 transition-opacity"
+                  >
+                    {deletingId === deck.id ? "…" : "Delete"}
+                  </button>
+                </div>
               </div>
             ))}
           </div>
