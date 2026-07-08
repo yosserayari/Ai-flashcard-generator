@@ -35,7 +35,7 @@ export async function POST(
     const token = authHeader.split(' ')[1];
     console.log('5. Token received (first 20 chars):', token.substring(0, 20) + '...');
     
-    const supabase = createClient();
+    const supabase = createClient(token);
     console.log('6. Supabase client created');
     
     // Verify the user
