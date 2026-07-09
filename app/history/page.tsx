@@ -4,6 +4,7 @@ import { useEffect, useState } from "react";
 import { createClient } from "../lib/supabase";
 import FlashcardViewer from "../components/FlashcardViewer";
 import ShareDeckButton from "../components/ShareDeckButton";
+import { calculateNextReview, isCardDue, isCardMastered } from "../lib/spacedRepetition";
 import type { Card } from "../lib/types";
 
 interface SavedDeck {
@@ -25,6 +26,9 @@ export default function HistoryPage() {
   const [selectedCards, setSelectedCards] = useState<Card[]>([]);
   const [loadingCards, setLoadingCards] = useState(false);
 
+  // "all" shows every card in the deck, "due" filters to cards ready for review
+  const [reviewMode, setReviewMode] = useState<"all" | "due">("all");
+
   useEffect(() => {
     checkUserAndFetchDecks();
   }, []);
@@ -32,11 +36,10 @@ export default function HistoryPage() {
   async function checkUserAndFetchDecks() {
     setIsLoading(true);
     const supabase = createClient();
-    
+
     try {
-      // Check if user is authenticated
       const { data: { user }, error: userError } = await supabase.auth.getUser();
-      
+
       if (userError || !user) {
         console.log('User not authenticated');
         setUser(null);
@@ -44,18 +47,17 @@ export default function HistoryPage() {
         setIsLoading(false);
         return;
       }
-      
+
       setUser(user);
-      
-      // Fetch decks for this user
+
       const { data, error } = await supabase
         .from("decks")
         .select("id, title, created_at, share_id")
         .eq("user_id", user.id)
         .order("created_at", { ascending: false });
-        
+
       if (error) throw error;
-      
+
       console.log('Fetched decks:', data);
       setDecks(data || []);
     } catch (err: any) {
@@ -68,12 +70,14 @@ export default function HistoryPage() {
 
   async function openDeck(deck: SavedDeck) {
     setSelectedDeck(deck);
+    setReviewMode("all");
     setLoadingCards(true);
     const supabase = createClient();
     try {
+      // Pull everything needed for spaced repetition, not just question/answer
       const { data, error } = await supabase
         .from("cards")
-        .select("question, answer")
+        .select("id, question, answer, deck_id, interval_days, ease_factor, next_review_at")
         .eq("deck_id", deck.id)
         .order("position", { ascending: true });
       if (error) throw error;
@@ -106,6 +110,46 @@ export default function HistoryPage() {
     } finally {
       setDeletingId(null);
     }
+  }
+
+  // Same rating handler as the home page, now available for saved decks too
+  async function handleRateCard(cardId: string, rating: "easy" | "hard") {
+    const targetCard = selectedCards.find((c) => c.id === cardId);
+    if (!targetCard) return;
+
+    const supabase = createClient();
+
+    const currentInterval = targetCard.interval_days ?? 1;
+    const currentEase = targetCard.ease_factor ?? 2.5;
+
+    const updates = calculateNextReview(currentInterval, currentEase, rating);
+
+    const { error: dbError } = await supabase
+      .from("cards")
+      .update({
+        next_review_at: updates.next_review_at,
+        interval_days: updates.interval_days,
+        ease_factor: updates.ease_factor,
+      })
+      .eq("id", cardId);
+
+    if (dbError) {
+      console.error("Failed to persist card rating update:", dbError.message);
+      return;
+    }
+
+    setSelectedCards((prev) =>
+      prev.map((c) =>
+        c.id === cardId
+          ? {
+              ...c,
+              interval_days: updates.interval_days,
+              ease_factor: updates.ease_factor,
+              next_review_at: updates.next_review_at,
+            }
+          : c
+      )
+    );
   }
 
   if (isLoading) {
@@ -142,6 +186,11 @@ export default function HistoryPage() {
     );
   }
 
+  // Derived view data for the currently open deck
+  const dueCards = selectedCards.filter((c) => isCardDue(c.next_review_at));
+  const masteredCount = selectedCards.filter((c) => isCardMastered(c.ease_factor)).length;
+  const cardsToShow = reviewMode === "due" ? dueCards : selectedCards;
+
   return (
     <div className="min-h-screen bg-paper text-ink">
       <main className="max-w-2xl mx-auto px-6 py-10">
@@ -177,7 +226,57 @@ export default function HistoryPage() {
             ) : selectedCards.length === 0 ? (
               <p className="text-sm text-ink-soft/60 italic">This deck has no cards.</p>
             ) : (
-              <FlashcardViewer cards={selectedCards} deckLabel={selectedDeck.title} />
+              <div className="space-y-4">
+                {/* Mastery progress bar */}
+                <div>
+                  <div className="flex justify-between text-xs text-ink-soft/60 font-label mb-1">
+                    <span>{masteredCount} of {selectedCards.length} mastered</span>
+                    <span>{Math.round((masteredCount / selectedCards.length) * 100)}%</span>
+                  </div>
+                  <div className="w-full h-1.5 bg-line rounded-full overflow-hidden">
+                    <div
+                      className="h-full bg-teal transition-all"
+                      style={{ width: `${(masteredCount / selectedCards.length) * 100}%` }}
+                    />
+                  </div>
+                </div>
+
+                {/* All / Due toggle */}
+                <div className="flex gap-2">
+                  <button
+                    onClick={() => setReviewMode("all")}
+                    className={`text-xs px-3 py-1.5 rounded-md font-medium border transition-colors ${
+                      reviewMode === "all"
+                        ? "bg-ink text-paper border-ink"
+                        : "border-line hover:border-ink"
+                    }`}
+                  >
+                    All cards ({selectedCards.length})
+                  </button>
+                  <button
+                    onClick={() => setReviewMode("due")}
+                    className={`text-xs px-3 py-1.5 rounded-md font-medium border transition-colors ${
+                      reviewMode === "due"
+                        ? "bg-ink text-paper border-ink"
+                        : "border-line hover:border-ink"
+                    }`}
+                  >
+                    Due today ({dueCards.length})
+                  </button>
+                </div>
+
+                {cardsToShow.length === 0 ? (
+                  <p className="text-sm text-ink-soft/60 italic py-8 text-center">
+                    Nothing due right now — nice work. Check back later or switch to "All cards."
+                  </p>
+                ) : (
+                  <FlashcardViewer
+                    cards={cardsToShow}
+                    deckLabel={selectedDeck.title}
+                    onRateCard={handleRateCard}
+                  />
+                )}
+              </div>
             )}
           </div>
         ) : loadingDecks ? (
@@ -194,7 +293,7 @@ export default function HistoryPage() {
                 className="group flex items-center justify-between gap-4 py-4 border-b border-line"
               >
                 {/* Clickable deck area */}
-                <div 
+                <div
                   onClick={() => openDeck(deck)}
                   className="flex items-baseline gap-4 min-w-0 flex-1 cursor-pointer"
                 >
@@ -217,14 +316,12 @@ export default function HistoryPage() {
 
                 {/* Action buttons */}
                 <div className="flex items-center gap-2 shrink-0">
-                  {/* Share Button - Always show if user is logged in */}
-                  <ShareDeckButton 
-                    deckId={deck.id} 
+                  <ShareDeckButton
+                    deckId={deck.id}
                     deckTitle={deck.title}
                     existingShareId={deck.share_id}
                   />
-                  
-                  {/* Delete Button */}
+
                   <button
                     onClick={(e) => deleteDeck(deck.id, e)}
                     disabled={deletingId === deck.id}

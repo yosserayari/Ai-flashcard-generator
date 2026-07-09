@@ -1,4 +1,4 @@
-import { createClient } from '../../../../lib/supabase';
+import { createClient, createServerClient } from '../../../../lib/supabase';
 import { NextRequest, NextResponse } from 'next/server';
 import { nanoid } from 'nanoid';
 
@@ -35,12 +35,10 @@ export async function POST(
     const token = authHeader.split(' ')[1];
     console.log('5. Token received (first 20 chars):', token.substring(0, 20) + '...');
     
-    const supabase = createClient(token);
-    console.log('6. Supabase client created');
-    
-    // Verify the user
-    console.log('7. Verifying user with token...');
+    const supabase = createServerClient(token);
     const { data: { user }, error: userError } = await supabase.auth.getUser(token);
+    
+
 
     if (userError) {
       console.log('8. User error:', userError);

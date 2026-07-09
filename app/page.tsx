@@ -4,6 +4,8 @@ import { createClient } from "./lib/supabase";
 import { useState, useEffect, useRef } from "react";
 import FlashcardViewer from "./components/FlashcardViewer";
 import type { Card } from "./lib/types";
+import { calculateNextReview } from "./lib/spacedRepetition";
+
 
 interface User {
   id: string;
@@ -25,37 +27,6 @@ function deriveDeckTitle(cards: Card[]): string {
   }
   if (!title) title = source.slice(0, 45);
   return title.length < source.length ? `${title}…` : title;
-}
-
-// SM2 Algorithm Utility function directly inside page.tsx context
-function calculateNextReview(
-  currentInterval: number,
-  currentEase: number,
-  rating: "easy" | "hard"
-) {
-  let nextInterval = 1;
-  let nextEase = currentEase;
-
-  if (rating === "easy") {
-    if (currentInterval === 1) {
-      nextInterval = 3;
-    } else {
-      nextInterval = Math.ceil(currentInterval * currentEase);
-    }
-    nextEase = Math.min(currentEase + 0.15, 3.0);
-  } else {
-    nextInterval = 1;
-    nextEase = Math.max(currentEase - 0.3, 1.3);
-  }
-
-  const nextReviewAt = new Date();
-  nextReviewAt.setDate(nextReviewAt.getDate() + nextInterval);
-
-  return {
-    next_review_at: nextReviewAt.toISOString(),
-    interval_days: nextInterval,
-    ease_factor: nextEase,
-  };
 }
 
 export default function Home() {
