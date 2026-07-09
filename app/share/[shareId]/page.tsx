@@ -1,6 +1,8 @@
 import { createServerClient } from '@supabase/ssr';
 import { cookies } from 'next/headers';
+import { Suspense } from 'react';
 import PublicFlashcardViewer from './PublicFlashcardViewer';
+import CloneDeckButton from '../../components/CloneDeckButton';
 
 // This page uses Server Components for SEO and performance
 export default async function SharedDeckPage({
@@ -9,9 +11,9 @@ export default async function SharedDeckPage({
   params: Promise<{ shareId: string }>;
 }) {
   const { shareId } = await params;
-  
+
   const cookieStore = await cookies();
-  
+
   const supabase = createServerClient(
     process.env.NEXT_PUBLIC_SUPABASE_URL!,
     process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!,
@@ -89,12 +91,17 @@ export default async function SharedDeckPage({
               Shared flashcard deck • {cards.length} cards
             </p>
           </div>
-          <a
-            href="/"
-            className="text-sm bg-teal text-white px-4 py-2 rounded-md font-medium hover:bg-teal/90 transition-colors"
-          >
-            Create your own
-          </a>
+          <div className="flex items-center gap-3">
+            <Suspense fallback={null}>
+              <CloneDeckButton shareId={shareId} />
+            </Suspense>
+            <a
+              href="/"
+              className="text-sm bg-teal text-white px-4 py-2 rounded-md font-medium hover:bg-teal/90 transition-colors"
+            >
+              Create your own
+            </a>
+          </div>
         </div>
       </header>
 
